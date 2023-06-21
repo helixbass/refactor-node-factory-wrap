@@ -113,7 +113,20 @@ fn remove_range_in_file(
         .unwrap();
 }
 
-fn rename_target_method_definition(target_method_definition: &MethodDefinitionLocationAndName) {
+fn insert_before_line_in_file(file_path: &str, start_line: usize, addition: &str) {
+    let mut file_text = Rope::from_reader(File::open(file_path).unwrap()).unwrap();
+
+    let start_index = file_text.line_to_char(start_line);
+    file_text.insert(start_index, addition);
+
+    file_text
+        .write_to(BufWriter::new(File::create(file_path).unwrap()))
+        .unwrap();
+}
+
+fn rename_target_method_definition_and_add_macro_attribute(
+    target_method_definition: &MethodDefinitionLocationAndName,
+) {
     replace_range_in_file(
         &target_method_definition.location.file_path,
         target_method_definition.location.line,
@@ -122,11 +135,18 @@ fn rename_target_method_definition(target_method_definition: &MethodDefinitionLo
         target_method_definition.location.column + target_method_definition.method_name.len(),
         &format!("{}_raw", target_method_definition.method_name),
     );
+    insert_before_line_in_file(
+        &target_method_definition.location.file_path,
+        target_method_definition.location.line,
+        "#[generate_node_factory_method_wrapper]\n",
+    );
 }
 
-fn rename_target_method_definitions(target_method_definitions: &[MethodDefinitionLocationAndName]) {
+fn rename_target_method_definitions_and_add_macro_attribute(
+    target_method_definitions: &[MethodDefinitionLocationAndName],
+) {
     for target_method_definition in target_method_definitions {
-        rename_target_method_definition(target_method_definition);
+        rename_target_method_definition_and_add_macro_attribute(target_method_definition);
     }
 }
 
@@ -398,7 +418,6 @@ fn remove_wrap_invocations(wrap_invocations: &[Location]) {
 fn main() {
     env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust").unwrap();
 
-    // let target_method_definitions = get_target_method_definitions();
     let target_method_definitions = get_target_method_definitions();
     let target_method_definitions_by_name: HashMap<_, _> = target_method_definitions
         .iter()
@@ -413,7 +432,7 @@ fn main() {
         get_target_method_invocations(&target_method_definitions_by_name);
     target_method_invocations.sort();
     target_method_invocations.reverse();
-    rename_target_method_definitions(&target_method_definitions);
+    rename_target_method_definitions_and_add_macro_attribute(&target_method_definitions);
     rename_target_method_invocations(&target_method_invocations);
     let mut target_method_invocations_with_wrap =
         get_target_method_invocations_with_wrap(&target_method_definitions_by_name);
