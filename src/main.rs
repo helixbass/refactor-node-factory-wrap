@@ -1,9 +1,5 @@
-use std::{
-    env,
-    fs::File,
-    io::{self, BufWriter},
-    process::Command,
-};
+#![allow(clippy::into_iter_on_ref, clippy::expect_fun_call)]
+use std::{env, fs::File, io::BufWriter, process::Command};
 
 use ropey::Rope;
 
@@ -15,21 +11,21 @@ macro_rules! regex {
     }};
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Location {
     line: usize,
     column: usize,
     file_path: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct MethodDefinitionLocationAndName {
     location: Location,
     method_name: String,
 }
 
 fn parse_target_method_definition(match_text: &str) -> MethodDefinitionLocationAndName {
-    let captures = regex!(r#"([^:]+):(\d+):(\d+):.* fn ([a-z_]+)"#)
+    let captures = regex!(r#"^([^:]+):(\d+):(\d+):.* fn ([a-z_]+)"#)
         .captures(match_text)
         .expect(&format!(
             "target method definition regex didn't match line: '{match_text}'"
@@ -56,7 +52,7 @@ fn parse_target_method_definitions(matches_text: &str) -> Vec<MethodDefinitionLo
         .collect()
 }
 
-fn get_target_method_definitions() -> io::Result<Vec<MethodDefinitionLocationAndName>> {
+fn get_target_method_definitions() -> Vec<MethodDefinitionLocationAndName> {
     let output = Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
         .args([
             "-q",
@@ -74,10 +70,9 @@ fn get_target_method_definitions() -> io::Result<Vec<MethodDefinitionLocationAnd
             "--vimgrep",
             "./src/compiler/factory/node_factory",
         ])
-        .output()?;
-    Ok(parse_target_method_definitions(
-        std::str::from_utf8(&output.stdout).unwrap(),
-    ))
+        .output()
+        .unwrap();
+    parse_target_method_definitions(std::str::from_utf8(&output.stdout).unwrap())
 }
 
 fn replace_range_in_file(
@@ -117,11 +112,91 @@ fn rename_target_method_definitions(target_method_definitions: &[MethodDefinitio
     }
 }
 
-fn main() -> io::Result<()> {
-    env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust")?;
+#[derive(Debug)]
+struct MethodCallLocation {
+    location: Location,
+    method_definition: MethodDefinitionLocationAndName,
+}
 
-    let target_method_definitions = get_target_method_definitions()?;
+fn get_target_method_invocations(
+    target_method_definitions: &[MethodDefinitionLocationAndName],
+) -> Vec<MethodCallLocation> {
+    target_method_definitions
+        .into_iter()
+        .flat_map(|target_method_definition| {
+            let output =
+                Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
+                    .args([
+                        "-q",
+                        &format!(
+                            r#"(call_expression
+                              function: (field_expression
+                                field: (field_identifier) @method_name (#eq? @method_name "{}")
+                              )
+                             )"#,
+                            target_method_definition.method_name
+                        ),
+                        "-l",
+                        "rust",
+                        "--vimgrep",
+                        "./src/compiler",
+                    ])
+                    .output()
+                    .unwrap();
+            parse_target_method_invocations(
+                std::str::from_utf8(&output.stdout).unwrap(),
+                target_method_definition.clone(),
+            )
+        })
+        .collect()
+}
+
+fn parse_target_method_invocation(
+    match_text: &str,
+    target_method_definition: MethodDefinitionLocationAndName,
+) -> MethodCallLocation {
+    let captures = regex!(r#"^([^:]+):(\d+):(\d+):"#)
+        .captures(match_text)
+        .expect(&format!(
+            "target method invocation regex didn't match line: '{match_text}'"
+        ));
+    let file_path = captures[1].to_owned();
+    let line: usize = captures[2].parse::<usize>().unwrap() - 1;
+    let column: usize = captures[3].parse::<usize>().unwrap() - 1;
+    MethodCallLocation {
+        location: Location {
+            line,
+            column,
+            file_path,
+        },
+        method_definition: target_method_definition,
+    }
+}
+
+fn parse_target_method_invocations(
+    matches_text: &str,
+    target_method_definition: MethodDefinitionLocationAndName,
+) -> Vec<MethodCallLocation> {
+    matches_text
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| parse_target_method_invocation(line, target_method_definition.clone()))
+        .collect()
+}
+
+fn main() {
+    env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust").unwrap();
+
+    // let target_method_definitions = get_target_method_definitions();
+    let target_method_definitions = get_target_method_definitions()
+        .into_iter()
+        .take(4)
+        .collect::<Vec<_>>();
+    let target_method_invocations = get_target_method_invocations(&target_method_definitions);
+    println!(
+        "target_method_invocations len: {}",
+        target_method_invocations.len()
+    );
     rename_target_method_definitions(&target_method_definitions);
     // println!("target_method_definitions: {target_method_definitions:#?}");
-    Ok(())
 }
