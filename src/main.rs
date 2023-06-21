@@ -185,24 +185,34 @@ struct MethodCallLocation {
     method_definition: MethodDefinitionLocationAndName,
 }
 
+fn get_target_method_invocation_query(
+    target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
+    append_raw: bool,
+) -> String {
+    format!(
+        r#"(call_expression
+             function: (field_expression
+               field: (field_identifier) @method_name (#match? @method_name "{}")
+             )
+           )"#,
+        target_method_definitions_by_name
+            .keys()
+            .map(|method_name| format!(
+                "(?:^{method_name}{}$)",
+                append_raw.then_some("_raw").unwrap_or_default()
+            ))
+            .collect::<Vec<_>>()
+            .join("|")
+    )
+}
+
 fn get_target_method_invocations(
     target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
 ) -> Vec<MethodCallLocation> {
     let output = Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
         .args([
             "-q",
-            &format!(
-                r#"(call_expression
-                     function: (field_expression
-                       field: (field_identifier) @method_name (#match? @method_name "{}")
-                     )
-                   )"#,
-                target_method_definitions_by_name
-                    .keys()
-                    .map(|method_name| format!("(?:^{method_name}$)"))
-                    .collect::<Vec<_>>()
-                    .join("|")
-            ),
+            &get_target_method_invocation_query(target_method_definitions_by_name, false),
             "-l",
             "rust",
             "--vimgrep",
@@ -217,29 +227,27 @@ fn get_target_method_invocations(
     )
 }
 
+fn get_wrap_query(
+    target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
+) -> String {
+    format!(
+        r#"(call_expression
+             function: (field_expression
+               value: {}
+               field: (field_identifier) @wrap (#eq? @wrap "wrap")
+             )
+        )"#,
+        get_target_method_invocation_query(target_method_definitions_by_name, true)
+    )
+}
+
 fn get_target_method_invocations_with_wrap(
     target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
 ) -> Vec<MethodCallLocation> {
     let output = Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
         .args([
             "-q",
-            &format!(
-                r#"(call_expression
-                     function: (field_expression
-                       value: (call_expression
-                         function: (field_expression
-                           field: (field_identifier) @method_name (#match? @method_name "{}")
-                         )
-                       )
-                       field: (field_identifier) @wrap (#eq? @wrap "wrap")
-                     )
-                )"#,
-                target_method_definitions_by_name
-                    .keys()
-                    .map(|method_name| format!("(?:^{method_name}_raw$)"))
-                    .collect::<Vec<_>>()
-                    .join("|")
-            ),
+            &get_wrap_query(target_method_definitions_by_name),
             "-l",
             "rust",
             "--vimgrep",
@@ -260,23 +268,7 @@ fn get_wrap_invocations_to_remove(
     let output = Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
         .args([
             "-q",
-            &format!(
-                r#"(call_expression
-                     function: (field_expression
-                       value: (call_expression
-                         function: (field_expression
-                           field: (field_identifier) @method_name (#match? @method_name "{}")
-                         )
-                       )
-                       field: (field_identifier) @wrap (#eq? @wrap "wrap")
-                     )
-                )"#,
-                target_method_definitions_by_name
-                    .keys()
-                    .map(|method_name| format!("(?:^{method_name}_raw$)"))
-                    .collect::<Vec<_>>()
-                    .join("|")
-            ),
+            &get_wrap_query(target_method_definitions_by_name),
             "-l",
             "rust",
             "--vimgrep",
@@ -431,6 +423,10 @@ fn main() {
         get_wrap_invocations_to_remove(&target_method_definitions_by_name);
     wrap_invocations_to_remove.sort();
     wrap_invocations_to_remove.reverse();
+    assert_eq!(
+        target_method_invocations_with_wrap.len(),
+        wrap_invocations_to_remove.len()
+    );
     remove_wrap_invocations(&wrap_invocations_to_remove);
     rename_target_method_invocations_with_wrap(&target_method_invocations_with_wrap);
 }
