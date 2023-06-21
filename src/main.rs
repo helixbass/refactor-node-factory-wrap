@@ -1,4 +1,11 @@
-use std::{env, io, process::Command};
+use std::{
+    env,
+    fs::File,
+    io::{self, BufWriter},
+    process::Command,
+};
+
+use ropey::Rope;
 
 #[macro_export]
 macro_rules! regex {
@@ -10,8 +17,8 @@ macro_rules! regex {
 
 #[derive(Debug)]
 struct Location {
-    line: u32,
-    column: u32,
+    line: usize,
+    column: usize,
     file_path: String,
 }
 
@@ -28,8 +35,8 @@ fn parse_target_method_definition(match_text: &str) -> MethodDefinitionLocationA
             "target method definition regex didn't match line: '{match_text}'"
         ));
     let file_path = captures[1].to_owned();
-    let line: u32 = captures[2].parse().unwrap();
-    let column: u32 = captures[3].parse().unwrap();
+    let line: usize = captures[2].parse::<usize>().unwrap() - 1;
+    let column: usize = captures[3].parse::<usize>().unwrap() - 1;
     let method_name = captures[4].to_owned();
     MethodDefinitionLocationAndName {
         location: Location {
@@ -73,10 +80,48 @@ fn get_target_method_definitions() -> io::Result<Vec<MethodDefinitionLocationAnd
     ))
 }
 
+fn replace_range_in_file(
+    file_path: &str,
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+    replacement: &str,
+) {
+    let mut file_text = Rope::from_reader(File::open(file_path).unwrap()).unwrap();
+
+    let start_index = file_text.line_to_char(start_line) + start_column;
+    let end_index = file_text.line_to_char(end_line) + end_column;
+    file_text.remove(start_index..end_index);
+    file_text.insert(start_index, replacement);
+
+    file_text
+        .write_to(BufWriter::new(File::create(file_path).unwrap()))
+        .unwrap();
+}
+
+fn rename_target_method_definition(target_method_definition: &MethodDefinitionLocationAndName) {
+    replace_range_in_file(
+        &target_method_definition.location.file_path,
+        target_method_definition.location.line,
+        target_method_definition.location.column,
+        target_method_definition.location.line,
+        target_method_definition.location.column + target_method_definition.method_name.len(),
+        &format!("{}_raw", target_method_definition.method_name),
+    );
+}
+
+fn rename_target_method_definitions(target_method_definitions: &[MethodDefinitionLocationAndName]) {
+    for target_method_definition in target_method_definitions {
+        rename_target_method_definition(target_method_definition);
+    }
+}
+
 fn main() -> io::Result<()> {
     env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust")?;
 
     let target_method_definitions = get_target_method_definitions()?;
-    println!("target_method_definitions: {target_method_definitions:#?}");
+    rename_target_method_definitions(&target_method_definitions);
+    // println!("target_method_definitions: {target_method_definitions:#?}");
     Ok(())
 }
