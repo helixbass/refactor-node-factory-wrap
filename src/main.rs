@@ -1,5 +1,5 @@
 #![allow(clippy::into_iter_on_ref, clippy::expect_fun_call)]
-use std::{env, fs::File, io::BufWriter, process::Command};
+use std::{collections::HashMap, env, fs::File, io::BufWriter, process::Command};
 
 use ropey::Rope;
 
@@ -119,43 +119,41 @@ struct MethodCallLocation {
 }
 
 fn get_target_method_invocations(
-    target_method_definitions: &[MethodDefinitionLocationAndName],
+    target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
 ) -> Vec<MethodCallLocation> {
-    target_method_definitions
-        .into_iter()
-        .flat_map(|target_method_definition| {
-            let output =
-                Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
-                    .args([
-                        "-q",
-                        &format!(
-                            r#"(call_expression
-                              function: (field_expression
-                                field: (field_identifier) @method_name (#eq? @method_name "{}")
-                              )
-                             )"#,
-                            target_method_definition.method_name
-                        ),
-                        "-l",
-                        "rust",
-                        "--vimgrep",
-                        "./src/compiler",
-                    ])
-                    .output()
-                    .unwrap();
-            parse_target_method_invocations(
-                std::str::from_utf8(&output.stdout).unwrap(),
-                target_method_definition.clone(),
-            )
-        })
-        .collect()
+    let output = Command::new("/Users/jrosse/prj/tree-sitter-grep/target/release/tree-sitter-grep")
+        .args([
+            "-q",
+            &format!(
+                r#"(call_expression
+                      function: (field_expression
+                        field: (field_identifier) @method_name (#match? @method_name "{}")
+                      )
+                     )"#,
+                target_method_definitions_by_name
+                    .keys()
+                    .map(|method_name| format!("(?:^{method_name}$)"))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            ),
+            "-l",
+            "rust",
+            "--vimgrep",
+            "./src/compiler",
+        ])
+        .output()
+        .unwrap();
+    parse_target_method_invocations(
+        std::str::from_utf8(&output.stdout).unwrap(),
+        target_method_definitions_by_name,
+    )
 }
 
 fn parse_target_method_invocation(
     match_text: &str,
-    target_method_definition: MethodDefinitionLocationAndName,
+    target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
 ) -> MethodCallLocation {
-    let captures = regex!(r#"^([^:]+):(\d+):(\d+):"#)
+    let captures = regex!(r#"^([^:]+):(\d+):(\d+):(.+)"#)
         .captures(match_text)
         .expect(&format!(
             "target method invocation regex didn't match line: '{match_text}'"
@@ -163,6 +161,17 @@ fn parse_target_method_invocation(
     let file_path = captures[1].to_owned();
     let line: usize = captures[2].parse::<usize>().unwrap() - 1;
     let column: usize = captures[3].parse::<usize>().unwrap() - 1;
+    let line_text = &captures[4];
+    let method_name_match = regex!(r#"^[a-z_]+"#)
+        .captures(&line_text[column..])
+        .expect(&format!(
+            "couldn't find invoked method name at column position in line: '{match_text}'"
+        ));
+    let method_name = &method_name_match[0];
+    let target_method_definition = target_method_definitions_by_name
+        .get(method_name)
+        .cloned()
+        .expect(&format!("found method name wasn't known: '{method_name}'"));
     MethodCallLocation {
         location: Location {
             line,
@@ -175,12 +184,12 @@ fn parse_target_method_invocation(
 
 fn parse_target_method_invocations(
     matches_text: &str,
-    target_method_definition: MethodDefinitionLocationAndName,
+    target_method_definitions_by_name: &HashMap<String, MethodDefinitionLocationAndName>,
 ) -> Vec<MethodCallLocation> {
     matches_text
         .split('\n')
         .filter(|line| !line.is_empty())
-        .map(|line| parse_target_method_invocation(line, target_method_definition.clone()))
+        .map(|line| parse_target_method_invocation(line, target_method_definitions_by_name))
         .collect()
 }
 
@@ -188,11 +197,18 @@ fn main() {
     env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust").unwrap();
 
     // let target_method_definitions = get_target_method_definitions();
-    let target_method_definitions = get_target_method_definitions()
-        .into_iter()
-        .take(4)
-        .collect::<Vec<_>>();
-    let target_method_invocations = get_target_method_invocations(&target_method_definitions);
+    let target_method_definitions = get_target_method_definitions();
+    let target_method_definitions_by_name: HashMap<_, _> = target_method_definitions
+        .iter()
+        .map(|target_method_definition| {
+            (
+                target_method_definition.method_name.clone(),
+                target_method_definition.clone(),
+            )
+        })
+        .collect();
+    let target_method_invocations =
+        get_target_method_invocations(&target_method_definitions_by_name);
     println!(
         "target_method_invocations len: {}",
         target_method_invocations.len()
