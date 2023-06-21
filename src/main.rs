@@ -112,6 +112,27 @@ fn rename_target_method_definitions(target_method_definitions: &[MethodDefinitio
     }
 }
 
+fn rename_target_method_invocation(target_method_invocation: &MethodCallLocation) {
+    replace_range_in_file(
+        &target_method_invocation.location.file_path,
+        target_method_invocation.location.line,
+        target_method_invocation.location.column,
+        target_method_invocation.location.line,
+        target_method_invocation.location.column
+            + target_method_invocation.method_definition.method_name.len(),
+        &format!(
+            "{}_raw",
+            target_method_invocation.method_definition.method_name
+        ),
+    );
+}
+
+fn rename_target_method_invocations(target_method_invocations: &[MethodCallLocation]) {
+    for target_method_invocation in target_method_invocations {
+        rename_target_method_invocation(target_method_invocation);
+    }
+}
+
 #[derive(Debug)]
 struct MethodCallLocation {
     location: Location,
@@ -214,5 +235,6 @@ fn main() {
         target_method_invocations.len()
     );
     rename_target_method_definitions(&target_method_definitions);
+    rename_target_method_invocations(&target_method_invocations);
     // println!("target_method_definitions: {target_method_definitions:#?}");
 }
