@@ -2,3 +2,7 @@
 name = "refactor-node-factory-wrap"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+regex = "1.8.4"
+ropey = "1.6.0"
