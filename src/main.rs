@@ -380,25 +380,6 @@ fn parse_wrap_invocations(matches_text: &str) -> Vec<Location> {
         .collect()
 }
 
-// fn assert_that_all_target_method_invocations_are_on_different_lines(
-//     target_method_invocations: &[MethodCallLocation],
-// ) {
-//     let mut invocation_lines: HashSet<(_, usize)> = Default::default();
-//     for target_method_invocation in target_method_invocations {
-//         let key = (
-//             &target_method_invocation.location.file_path,
-//             target_method_invocation.location.line,
-//         );
-//         if invocation_lines.get(&key).is_some() {
-//             println!(
-//                 "Found line with multiple invocations: {}:{}",
-//                 target_method_invocation.location.file_path, target_method_invocation.location.line
-//             );
-//         }
-//         invocation_lines.insert(key);
-//     }
-// }
-
 fn remove_wrap_invocation(wrap_invocation: &Location) {
     remove_range_in_file(
         &wrap_invocation.file_path,
@@ -418,7 +399,9 @@ fn remove_wrap_invocations(wrap_invocations: &[Location]) {
 fn main() {
     env::set_current_dir("/Users/jrosse/prj/tsc-rust/typescript_rust").unwrap();
 
-    let target_method_definitions = get_target_method_definitions();
+    let mut target_method_definitions = get_target_method_definitions();
+    target_method_definitions.sort();
+    target_method_definitions.reverse();
     let target_method_definitions_by_name: HashMap<_, _> = target_method_definitions
         .iter()
         .map(|target_method_definition| {
@@ -428,12 +411,14 @@ fn main() {
             )
         })
         .collect();
+    rename_target_method_definitions_and_add_macro_attribute(&target_method_definitions);
+
     let mut target_method_invocations =
         get_target_method_invocations(&target_method_definitions_by_name);
     target_method_invocations.sort();
     target_method_invocations.reverse();
-    rename_target_method_definitions_and_add_macro_attribute(&target_method_definitions);
     rename_target_method_invocations(&target_method_invocations);
+
     let mut target_method_invocations_with_wrap =
         get_target_method_invocations_with_wrap(&target_method_definitions_by_name);
     target_method_invocations_with_wrap.sort();
